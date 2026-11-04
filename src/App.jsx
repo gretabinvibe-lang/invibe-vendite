@@ -279,6 +279,8 @@ function Login({ onLogin }) {
 }
 
 /* ---------------- SHELL ---------------- */
+// PR abilitati alla scheda Buoni in prova (poi si passa al flag "buoni" sull'utenza)
+const BUONI_PROVA = ["FG3"];
 const NAV = [
   { key: "dashboard", label: "Home", Icon: Home },
   { key: "funnel", label: "Funnel", Icon: Filter },
@@ -292,6 +294,7 @@ const NAV = [
 function Panel({ dl }) {
   const { user, leads: allLeads, loading, logout, refresh, accounts, lastSync } = dl;
   const isAdmin = user.ruolo === "admin";
+  const buoniOk = isAdmin || user.buoni || BUONI_PROVA.includes(user.codice_pr);
   const stagioni = useMemo(() => {
     const s = new Set(allLeads.map(stagioneDi).filter(Boolean));
     if (!s.size) s.add(new Date().getMonth() >= 8 ? new Date().getFullYear() + 1 : new Date().getFullYear());
@@ -310,7 +313,7 @@ function Panel({ dl }) {
   useEffect(() => { if (!isAdmin) traccia("venditore_traccia", { p_tipo: "vista", p_dettaglio: { pagina: view } }); }, [view, isAdmin, traccia]);
   const apri = (r) => { setSel(r); if (!isAdmin) traccia("venditore_traccia", { p_tipo: "scheda", p_dettaglio: { cod: r.cod, gruppo: r.nome } }); };
   // la scheda Buoni la vedono l'ufficio e i PR abilitati (user.buoni)
-  const items = NAV.filter((n) => (!n.admin || isAdmin) && (!n.buoni || isAdmin || user.buoni));
+  const items = NAV.filter((n) => (!n.admin || isAdmin) && (!n.buoni || buoniOk));
   const titles = {
     dashboard: isAdmin ? "Panoramica" : "La tua stagione",
     funnel: "Funnel",
@@ -375,7 +378,7 @@ function Panel({ dl }) {
           {view === "prenotazioni" && <Prenotazioni leads={leads} isAdmin={isAdmin} initial={jump} onOpen={apri} />}
           {view === "venditori" && isAdmin && <Venditori leads={leads} accounts={accounts} />}
           {view === "cronologia" && isAdmin && <Cronologia api={dl.api} accounts={accounts} leads={allLeads} onOpen={apri} />}
-          {view === "buoni" && (isAdmin || user.buoni) && <Buoni api={dl.api} isAdmin={isAdmin} accounts={accounts} user={user} />}
+          {view === "buoni" && buoniOk && <Buoni api={dl.api} isAdmin={isAdmin} accounts={accounts} user={user} />}
           {view === "utenze" && isAdmin && <Utenze api={dl.api} onChange={dl.reloadAccounts} me={user} />}
           {view === "profilo" && <Profilo user={user} leads={leads} isAdmin={isAdmin} stagione={stag} api={dl.api} updateUser={dl.updateUser} logout={logout} onOpen={apri} go={go} />}
         </div>
