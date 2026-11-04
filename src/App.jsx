@@ -4,7 +4,7 @@ import { supabase } from "./lib/supabase.js";
 import {
   Home, Filter, ListChecks, Trophy, LogOut, Search, ChevronRight, X, RefreshCw,
   MapPin, CalendarDays, BellRing, Users, Crown, ArrowRight, Sparkles,
-  UserRound, KeyRound, Copy, Check, Plus, History, Eye, LogIn, ShieldAlert, PenLine, FolderOpen, Phone, AtSign, Mail, ShieldCheck, MessageCircle, Lock, TrendingUp, Medal,
+  UserRound, KeyRound, Copy, Check, Plus, History, Eye, LogIn, ShieldAlert, PenLine, FolderOpen, Phone, AtSign, Mail, ShieldCheck, MessageCircle, Lock, TrendingUp, Medal, Ticket,
 } from "lucide-react";
 
 /* ============================================================
@@ -286,6 +286,7 @@ const NAV = [
   { key: "venditori", label: "Venditori", short: "PR", Icon: Trophy, admin: true },
   { key: "utenze", label: "Utenze", Icon: KeyRound, admin: true },
   { key: "cronologia", label: "Cronologia", short: "Storico", Icon: History, admin: true },
+  { key: "buoni", label: "Buoni sconto", short: "Buoni", Icon: Ticket, buoni: true },
   { key: "profilo", label: "Profilo", Icon: UserRound, noTab: true },
 ];
 function Panel({ dl }) {
@@ -308,7 +309,8 @@ function Panel({ dl }) {
   const traccia = dl.api;
   useEffect(() => { if (!isAdmin) traccia("venditore_traccia", { p_tipo: "vista", p_dettaglio: { pagina: view } }); }, [view, isAdmin, traccia]);
   const apri = (r) => { setSel(r); if (!isAdmin) traccia("venditore_traccia", { p_tipo: "scheda", p_dettaglio: { cod: r.cod, gruppo: r.nome } }); };
-  const items = NAV.filter((n) => !n.admin || isAdmin);
+  // la scheda Buoni la vedono l'ufficio e i PR abilitati (user.buoni)
+  const items = NAV.filter((n) => (!n.admin || isAdmin) && (!n.buoni || isAdmin || user.buoni));
   const titles = {
     dashboard: isAdmin ? "Panoramica" : "La tua stagione",
     funnel: "Funnel",
@@ -316,6 +318,7 @@ function Panel({ dl }) {
     venditori: "Venditori",
     utenze: "Utenze PR",
     cronologia: "Cronologia",
+    buoni: "Buoni sconto",
     profilo: isAdmin ? "Il tuo profilo" : "La tua area",
   };
   const prNomi = useMemo(() => { const m = {}; (accounts || []).forEach((a) => { if (a.codice_pr) m[a.codice_pr] = a.nome; }); return m; }, [accounts]);
@@ -372,6 +375,7 @@ function Panel({ dl }) {
           {view === "prenotazioni" && <Prenotazioni leads={leads} isAdmin={isAdmin} initial={jump} onOpen={apri} />}
           {view === "venditori" && isAdmin && <Venditori leads={leads} accounts={accounts} />}
           {view === "cronologia" && isAdmin && <Cronologia api={dl.api} accounts={accounts} leads={allLeads} onOpen={apri} />}
+          {view === "buoni" && (isAdmin || user.buoni) && <Buoni api={dl.api} isAdmin={isAdmin} accounts={accounts} user={user} />}
           {view === "utenze" && isAdmin && <Utenze api={dl.api} onChange={dl.reloadAccounts} me={user} />}
           {view === "profilo" && <Profilo user={user} leads={leads} isAdmin={isAdmin} stagione={stag} api={dl.api} updateUser={dl.updateUser} logout={logout} onOpen={apri} go={go} />}
         </div>
@@ -778,6 +782,178 @@ function Empty({ user }) {
       <span className="empty-ic"><Sparkles size={24} /></span>
       <h3>La stagione parte da te</h3>
       <p>Appena un cliente prenota col codice <b>{user.codice_pr}</b>, lo vedi qui con il suo stato.</p>
+    </div>
+  );
+}
+
+/* ---------------- BUONI SCONTO (progetto scuola) ----------------
+   I dati arrivano dal database InVibe tramite la funzione buoni_pr_dati
+   (controlla il token: il PR vede solo i suoi). Finché la funzione non c'è,
+   la scheda mostra dati di esempio con un avviso. */
+const FONTI_BUONI = {
+  qr_classe: { label: "QR in classe", color: "#1E6BF1" },
+  call: { label: "Call di 4ª e 5ª", color: "#7C3AED" },
+  volantino: { label: "Volantini", color: "#F97316" },
+  codice_sito: { label: "Codice sul sito", color: "#0D9488" },
+};
+const fonteInfo = (f) => FONTI_BUONI[f] || { label: f || "Altro", color: "#8F9BB2" };
+const statoPersona = (p) => p.prenotato_at ? { k: "pren", l: "Ha prenotato", cls: "ok" }
+  : p.ha_scritto_at ? { k: "scritto", l: "Ha scritto", cls: "" } : { k: "ricontattare", l: "Da ricontattare", cls: "warn" };
+const quandoBreve = (ts) => { const d = ts ? new Date(ts) : null; return d && !isNaN(d) ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" }) : "—"; };
+
+function buoniEsempio(pr) {
+  const ora = Date.now(), g = (n) => new Date(ora - n * 86400000).toISOString();
+  const scuole = [
+    { codice_scuola: "ES-0001", nome: "Liceo Scientifico Galilei (esempio)", comune: "Comune A", provincia: "XX", codice_sconto: "GALILEI(XX)100" },
+    { codice_scuola: "ES-0002", nome: "IIS Marconi (esempio)", comune: "Comune B", provincia: "XX", codice_sconto: "MARCONI(XX)100" },
+    { codice_scuola: "ES-0003", nome: "Liceo Classico Dante (esempio)", comune: "Comune C", provincia: "YY", codice_sconto: "DANTE(YY)100" },
+  ];
+  const nomi = ["Marco B.", "Giulia R.", "Luca F.", "Sara M.", "Andrea S.", "Chiara T.", "Matteo P.", "Elisa V.", "Davide C.", "Alice N.", "Pietro L.", "Martina G."];
+  const fonti = ["qr_classe", "qr_classe", "call", "codice_sito", "volantino"];
+  const persone = nomi.map((nome, i) => ({
+    nome, classe: `${4 + (i % 2)}${"ABC"[i % 3]}`, codice_scuola: scuole[i % 3].codice_scuola, fonte: fonti[i % 5],
+    arrivato_at: g(i % 6), ha_scritto_at: i % 3 !== 2 ? g(i % 4) : null, prenotato_at: i % 5 === 0 ? g(1) : null,
+    telefono: `333 ••• ${String(1000 + i * 137).slice(-4)}`,
+  }));
+  return { esempio: true, pr: pr || { codice: "—", nome: "Filippo Gioachin" }, aggiornato: new Date().toISOString(), scuole, persone };
+}
+
+function Buoni({ api, isAdmin, accounts = [], user }) {
+  const prList = useMemo(() => accounts.filter((a) => a.ruolo !== "admin" && a.codice_pr)
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || "")), [accounts]);
+  const filippo = prList.find((a) => /gioachin/i.test(a.nome || ""));
+  const [pr, setPr] = useState(isAdmin ? (filippo?.codice_pr || "") : user.codice_pr);
+  const [dati, setDati] = useState(null);
+  const [fonte, setFonte] = useState("");
+  const [scuola, setScuola] = useState(null);
+  useEffect(() => {
+    let vivo = true; setDati(null);
+    (async () => {
+      const d = await api("buoni_pr_dati", isAdmin ? { p_pr: pr || null } : {});
+      if (!vivo) return;
+      const nomePr = isAdmin ? (prList.find((a) => a.codice_pr === pr)?.nome || "Filippo Gioachin") : user.nome;
+      setDati(d && !d.error && Array.isArray(d.persone) ? d : buoniEsempio({ codice: pr || user.codice_pr, nome: nomePr }));
+    })();
+    return () => { vivo = false; };
+  }, [api, pr, isAdmin, prList, user]);
+
+  const calc = useMemo(() => {
+    if (!dati) return null;
+    const persone = fonte ? dati.persone.filter((p) => p.fonte === fonte) : dati.persone;
+    const conta = (arr) => ({ tot: arr.length, scritto: arr.filter((p) => p.ha_scritto_at).length,
+      ricontattare: arr.filter((p) => !p.ha_scritto_at && !p.prenotato_at).length, pren: arr.filter((p) => p.prenotato_at).length });
+    const perFonte = Object.keys(FONTI_BUONI).map((k) => ({ k, n: dati.persone.filter((p) => p.fonte === k).length }));
+    const scuole = dati.scuole.map((s) => ({ ...s, ...conta(persone.filter((p) => p.codice_scuola === s.codice_scuola)) }))
+      .sort((a, b) => b.tot - a.tot || a.nome.localeCompare(b.nome));
+    const recenti = [...persone].sort((a, b) => (b.arrivato_at || "").localeCompare(a.arrivato_at || "")).slice(0, 8);
+    return { tot: conta(persone), perFonte, scuole, recenti };
+  }, [dati, fonte]);
+
+  const nomeScuola = (c) => dati?.scuole.find((s) => s.codice_scuola === c)?.nome || c || "—";
+  const maxFonte = Math.max(1, ...(calc?.perFonte || []).map((f) => f.n));
+  return (
+    <div className="stack">
+      {isAdmin && (
+        <div className="filters">
+          <div className="frow">
+            <select className="bsel" value={pr} onChange={(e) => setPr(e.target.value)} aria-label="Vedi come il PR">
+              <option value="">Scegli il PR</option>
+              {prList.map((a) => <option key={a.codice_pr} value={a.codice_pr}>{a.nome} · {a.codice_pr}</option>)}
+            </select>
+            <span className="muted-s bnote">Vedi la scheda come la vede il PR</span>
+          </div>
+        </div>
+      )}
+      {dati?.esempio && (
+        <div className="bdemo" role="note"><b>Dati di esempio.</b> <span>La scheda non è ancora collegata al database dei buoni: numeri, scuole e nomi sono finti.</span></div>
+      )}
+      {!calc ? <div className="none pad">Carico i buoni…</div> : (
+        <>
+          <div className="kpis">
+            <div className="kpi"><b><Num n={calc.tot.tot} /></b><span>buoni presi</span><em>persone, non scansioni</em></div>
+            <div className="kpi"><b><Num n={calc.tot.scritto} /></b><span>hanno scritto</span><em>{calc.tot.tot ? Math.round(calc.tot.scritto / calc.tot.tot * 100) : 0}%</em></div>
+            <div className="kpi"><b className="tx-orange"><Num n={calc.tot.ricontattare} /></b><span>da ricontattare</span></div>
+            <div className="kpi"><b className="tx-green"><Num n={calc.tot.pren} /></b><span>hanno prenotato</span></div>
+          </div>
+
+          <div className="grid2">
+            <section className="card">
+              <div className="block-head"><h3>Da dove arrivano</h3><span className="muted-s">tocca per filtrare</span></div>
+              <div className="sbars">
+                {calc.perFonte.map((f) => { const fi = fonteInfo(f.k); return (
+                  <button key={f.k} className={`sbar ${fonte === f.k ? "sel" : ""} ${f.n === 0 ? "dim" : ""}`} onClick={() => setFonte(fonte === f.k ? "" : f.k)}>
+                    <span className="sbar-l"><i style={{ background: fi.color }} />{fi.label}</span>
+                    <span className="sbar-t"><span style={{ width: `${f.n / maxFonte * 100}%`, background: fi.color }} /></span>
+                    <span className="sbar-v"><b>{f.n}</b></span>
+                  </button>); })}
+              </div>
+              {fonte && <button className="linkbtn" onClick={() => setFonte("")}>Togli il filtro «{fonteInfo(fonte).label}»</button>}
+            </section>
+            <section className="card">
+              <div className="block-head"><h3>Ultimi arrivi</h3><span className="muted-s">{calc.recenti.length ? `aggiornato alle ${oraIt(new Date(dati.aggiornato))}` : ""}</span></div>
+              {calc.recenti.length === 0 ? <div className="none">Ancora nessun buono.</div> : (
+                <div className="brows">
+                  {calc.recenti.map((p, i) => <PersonaBuono key={i} p={p} scuola={nomeScuola(p.codice_scuola)} />)}
+                </div>
+              )}
+            </section>
+          </div>
+
+          <section className="card flush">
+            <div className="block-head bpad"><h3>Le tue scuole</h3><span className="muted-s">{calc.scuole.length} scuole</span></div>
+            <div className="vlist">
+              {calc.scuole.map((s) => (
+                <button key={s.codice_scuola} className="vrow" onClick={() => setScuola(s)}>
+                  <span className="bsc-main">
+                    <b>{s.nome}</b>
+                    <span className="row-meta"><span className="tchip">{s.comune}{s.provincia ? ` (${s.provincia})` : ""}</span>
+                      {s.codice_sconto && <span className="tchip bcode">{s.codice_sconto}</span>}</span>
+                  </span>
+                  <span className="bsc-nums">
+                    <span><b>{s.tot}</b><em>buoni</em></span>
+                    <span><b className={s.ricontattare ? "tx-orange" : ""}>{s.ricontattare}</b><em>da sentire</em></span>
+                    <span><b className="tx-green">{s.pren}</b><em>prenotati</em></span>
+                  </span>
+                  <ChevronRight size={16} className="vchev" />
+                </button>
+              ))}
+              {calc.scuole.length === 0 && <div className="none pad">Nessuna scuola assegnata.</div>}
+            </div>
+          </section>
+        </>
+      )}
+      {scuola && dati && (
+        <Sheet onClose={() => setScuola(null)}>
+          <div className="sh-head"><div><h2 className="bsh-t">{scuola.nome}</h2><span className="code-badge">{scuola.comune}{scuola.provincia ? ` (${scuola.provincia})` : ""}</span></div></div>
+          {scuola.codice_sconto && (
+            <div className="bcodebox"><span>Codice sconto della scuola</span><b>{scuola.codice_sconto}</b><Copiabile text={scuola.codice_sconto} /></div>
+          )}
+          <div className="sh-hero"><div><b>{scuola.tot}</b><span>buoni</span></div><div><b>{scuola.scritto}</b><span>scritto</span></div>
+            <div><b>{scuola.ricontattare}</b><span>da sentire</span></div><div><b>{scuola.pren}</b><span>prenotati</span></div></div>
+          <div className="sh-block"><h4>Studenti</h4>
+            <div className="brows">
+              {dati.persone.filter((p) => p.codice_scuola === scuola.codice_scuola && (!fonte || p.fonte === fonte))
+                .sort((a, b) => statoPersona(b).k.localeCompare(statoPersona(a).k))
+                .map((p, i) => <PersonaBuono key={i} p={p} />)}
+            </div>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+function PersonaBuono({ p, scuola }) {
+  const st = statoPersona(p), fi = fonteInfo(p.fonte);
+  const wa = !p.ha_scritto_at && p.telefono && !p.telefono.includes("•") ? waLink(p.telefono, `Ciao ${(p.nome || "").split(" ")[0]}! Ti scrivo per il buono sconto Invibe da 100 €`) : null;
+  return (
+    <div className="brow">
+      <Avatar name={p.nome} size={34} />
+      <span className="brow-main">
+        <b>{p.nome || "—"} <em>{p.classe}</em></b>
+        <span>{scuola ? `${scuola} · ` : ""}<i style={{ background: fi.color }} />{fi.label} · {quandoBreve(p.arrivato_at)}{p.telefono ? ` · ${p.telefono}` : ""}</span>
+      </span>
+      {wa ? <a className="btn-wa bwa" href={wa} target="_blank" rel="noreferrer"><MessageCircle size={14} />Scrivi</a>
+        : <span className={`ust ${st.cls}`}>{st.l}</span>}
     </div>
   );
 }
@@ -1278,7 +1454,7 @@ const CAT_STILE = {
   ufficio: { Icon: KeyRound, bg: "#FFEDD5", fg: "#9A3412" },
   allarme: { Icon: ShieldAlert, bg: "#FEE2E2", fg: "#991B1B" },
 };
-const PAGINE = { dashboard: "la Home", funnel: "il Funnel", prenotazioni: "le prenotazioni", profilo: "la sua area personale" };
+const PAGINE = { dashboard: "la Home", funnel: "il Funnel", prenotazioni: "le prenotazioni", profilo: "la sua area personale", buoni: "i buoni sconto" };
 function giornoLabel(d) {
   const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
   const g = new Date(d); g.setHours(0, 0, 0, 0);
@@ -1921,6 +2097,29 @@ select.season{appearance:none;-webkit-appearance:none;padding-right:28px;cursor:
 .funnel-grid>.card:first-child{position:sticky;top:84px}
 
 /* venditori */
+.tx-orange{color:var(--orange)}
+.bsel{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:9px 14px;font-size:13px;font-weight:600;max-width:100%}
+.bnote{align-self:center}
+.bdemo{display:flex;flex-wrap:wrap;gap:4px;background:var(--osoft);color:var(--oink);border-radius:16px;padding:12px 16px;font-size:13px}
+.bpad{padding:16px 18px 0}
+.bsc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;text-align:left}
+.bsc-main>b{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bcode{background:var(--vsoft);color:var(--vink);font-weight:800;letter-spacing:.02em}
+.bsc-nums{display:flex;gap:14px;flex-shrink:0}
+.bsc-nums span{display:flex;flex-direction:column;align-items:flex-end;min-width:44px}
+.bsc-nums b{font-size:17px;font-weight:800}.bsc-nums em{font-style:normal;font-size:10px;font-weight:600;color:var(--faint)}
+.brows{display:flex;flex-direction:column}
+.brow{display:flex;align-items:center;gap:10px;padding:9px 2px}
+.brow+.brow{border-top:1px solid var(--line)}
+.brow-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.brow-main b{font-size:13px;font-weight:700}.brow-main b em{font-style:normal;font-weight:600;color:var(--faint);margin-left:4px}
+.brow-main span{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.brow-main i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.bwa{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:7px 11px}
+.bsh-t{text-transform:none !important}
+.bcodebox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--vsoft);color:var(--vink);border-radius:16px;padding:12px 14px;margin-bottom:14px}
+.bcodebox span{font-size:12px;font-weight:600;flex-basis:100%}.bcodebox b{font-size:18px;font-weight:800;letter-spacing:.03em;flex:1}
+@media(max-width:560px){.bsc-nums{gap:8px}.bsc-nums span{min-width:36px}}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px 16px;display:flex;flex-direction:column}
 .kpi b{font-size:26px;font-weight:800;letter-spacing:-.03em}
