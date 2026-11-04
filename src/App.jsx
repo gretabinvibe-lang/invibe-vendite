@@ -280,7 +280,7 @@ function Login({ onLogin }) {
 
 /* ---------------- SHELL ---------------- */
 // PR abilitati alla scheda Buoni in prova (poi si passa al flag "buoni" sull'utenza)
-const BUONI_PROVA = ["FG3"];
+const BUONI_PROVA = ["FG2"];
 const NAV = [
   { key: "dashboard", label: "Home", Icon: Home },
   { key: "funnel", label: "Funnel", Icon: Filter },
